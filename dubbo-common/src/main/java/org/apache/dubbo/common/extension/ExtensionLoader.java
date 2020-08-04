@@ -85,9 +85,26 @@ public class ExtensionLoader<T> {
 
     private static final Pattern NAME_SEPARATOR = Pattern.compile("\\s*[,]+\\s*");
 
+    /**
+     * @jinzhanggui
+     * dubbo spi 机制中，一个接口对应一个loader，所有的loader存放在一个map里面，也即是EXTENSION_LOADERS
+     */
     private static final ConcurrentMap<Class<?>, ExtensionLoader<?>> EXTENSION_LOADERS = new ConcurrentHashMap<>(64);
 
+    /**
+     * @jinzhanggui
+     *
+     * */
+    private final ConcurrentMap<String, Holder<Object>> cachedInstances = new ConcurrentHashMap<>();
+
+
+    /**
+     * @jinzhanggui
+     * 一个接口，对应一个实例
+     */
     private static final ConcurrentMap<Class<?>, Object> EXTENSION_INSTANCES = new ConcurrentHashMap<>(64);
+
+
 
     private final Class<?> type;
 
@@ -98,7 +115,7 @@ public class ExtensionLoader<T> {
     private final Holder<Map<String, Class<?>>> cachedClasses = new Holder<>();
 
     private final Map<String, Object> cachedActivates = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, Holder<Object>> cachedInstances = new ConcurrentHashMap<>();
+
     private final Holder<Object> cachedAdaptiveInstance = new Holder<>();
     private volatile Class<?> cachedAdaptiveClass = null;
     private String cachedDefaultName;
@@ -149,6 +166,10 @@ public class ExtensionLoader<T> {
         return type.isAnnotationPresent(SPI.class);
     }
 
+    /**
+     * @jinzhanggui
+     * 获取某个接口的拓展加载器，并且一个接口只有一个拓展加载器
+     */
     @SuppressWarnings("unchecked")
     public static <T> ExtensionLoader<T> getExtensionLoader(Class<T> type) {
         if (type == null) {
@@ -161,9 +182,10 @@ public class ExtensionLoader<T> {
             throw new IllegalArgumentException("Extension type (" + type +
                     ") is not an extension, because it is NOT annotated with @" + SPI.class.getSimpleName() + "!");
         }
-
+        // 1. 从缓存中拿
         ExtensionLoader<T> loader = (ExtensionLoader<T>) EXTENSION_LOADERS.get(type);
         if (loader == null) {
+            // 2. 缓存中没有的话初始化一个放进去
             EXTENSION_LOADERS.putIfAbsent(type, new ExtensionLoader<T>(type));
             loader = (ExtensionLoader<T>) EXTENSION_LOADERS.get(type);
         }
@@ -413,6 +435,10 @@ public class ExtensionLoader<T> {
         return getExtension(name, true);
     }
 
+    /**
+     * @jinzhanggui
+     * 这里也是单例的意思
+     */
     public T getExtension(String name, boolean wrap) {
         if (StringUtils.isEmpty(name)) {
             throw new IllegalArgumentException("Extension name == null");
@@ -420,13 +446,14 @@ public class ExtensionLoader<T> {
         if ("true".equals(name)) {
             return getDefaultExtension();
         }
+        // 1. 尝试从缓存cachedInstances中拿到该name对应的Holder，进而从Holder中拿到对应接口的实例对象
         final Holder<Object> holder = getOrCreateHolder(name);
         Object instance = holder.get();
-        if (instance == null) {
+        if (instance == null) { // 2. 如果拿不到就初始化一个
             synchronized (holder) {
                 instance = holder.get();
                 if (instance == null) {
-                    instance = createExtension(name, wrap);
+                    instance = createExtension(name, wrap); // 3. 初始化的时候，进行一层包装，包装内容请点进去
                     holder.set(instance);
                 }
             }
@@ -630,14 +657,17 @@ public class ExtensionLoader<T> {
             throw findException(name);
         }
         try {
+            // 1. 尝试从缓存中拿到接口的实例，没有的话就初始化
             T instance = (T) EXTENSION_INSTANCES.get(clazz);
             if (instance == null) {
                 EXTENSION_INSTANCES.putIfAbsent(clazz, clazz.newInstance());
                 instance = (T) EXTENSION_INSTANCES.get(clazz);
             }
+
+            // 2. 注入依赖
             injectExtension(instance);
 
-
+            // 3. @problem
             if (wrap) {
 
                 List<Class<?>> wrapperClassesList = new ArrayList<>();
@@ -652,12 +682,14 @@ public class ExtensionLoader<T> {
                         Wrapper wrapper = wrapperClass.getAnnotation(Wrapper.class);
                         if (wrapper == null
                                 || (ArrayUtils.contains(wrapper.matches(), name) && !ArrayUtils.contains(wrapper.mismatches(), name))) {
+                            // 反射调用了一个构造函数，类似于装饰者模式？
                             instance = injectExtension((T) wrapperClass.getConstructor(type).newInstance(instance));
                         }
                     }
                 }
             }
 
+            // 4. 如果目标接口继承了 Lifecycle接口，则调用Lifecycle接口的initialize方法
             initExtension(instance);
             return instance;
         } catch (Throwable t) {
@@ -670,6 +702,10 @@ public class ExtensionLoader<T> {
         return getExtensionClasses().containsKey(name);
     }
 
+    /**
+     * @jinzhanggui
+     * 给拓展类注入依赖
+     */
     private T injectExtension(T instance) {
 
         if (objectFactory == null) {
@@ -691,11 +727,12 @@ public class ExtensionLoader<T> {
                 if (ReflectUtils.isPrimitives(pt)) {
                     continue;
                 }
-
+                // 上面三个if 的最终结果是寻找到一个 public void setXxxx(...) 方法，并且该方法没有被标注注解@DisableInject
                 try {
                     String property = getSetterProperty(method);
                     Object object = objectFactory.getExtension(pt, property);
                     if (object != null) {
+                        // 通过反射调用一个setter方法，不就是给一个实例注入依赖吗？
                         method.invoke(instance, object);
                     }
                 } catch (Exception e) {

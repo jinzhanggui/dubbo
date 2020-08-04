@@ -18,6 +18,7 @@ package org.apache.dubbo.common.utils;
 
 /**
  * Helper Class for hold a value.
+ * @jinzhanggui 本质上就是为了保存一个值，并且这里是线程安全的，因为volatile保证了顺序性和可见性，get/set保证了原子性
  */
 public class Holder<T> {
 

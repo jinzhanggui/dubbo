@@ -80,6 +80,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+/**
+ * @jinzhanggui dubbo spi机制 测试类
+ */
 public class ExtensionLoaderTest {
     @Test
     public void test_getExtensionLoader_Null() throws Exception {
